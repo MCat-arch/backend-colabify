@@ -9,8 +9,6 @@ const aiMessageSchema = mongoose.Schema({
     type: String,
     required: true,
   },
-  anonym_id: { type: String, default: null },
-  anonym_name: { type: String, default: "Anonymous" },
   reply: {
     type: String,
     required: true,

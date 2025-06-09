@@ -1,11 +1,10 @@
 const mongoose = require("mongoose");
 
 const userSchema = mongoose.Schema({
-    name: {type: String, required: function() { return this.role !== 'anonymous'; }},
-    email: { type:String, required: function() {return this.role !== 'anonymous';} },
-    password:{type: String, required: function() { return this.role !== 'anonymous'; }},
-    role: { type: String, enum: ['user', 'anonymous'], default: 'user' },
-    pic:{type:String,required: true, default: "https://www.google.com/url?sa=i&url=https%3A%2F%2Fpixabay.com%2Fvectors%2Fblank-profile-picture-mystery-man-973460%2F&psig=AOvVaw2QeCobo5aibROYjZFUy1Bn&ust=1748572037812000&source=images&cd=vfe&opi=89978449&ved=0CBEQjRxqFwoTCKjQvcvQx40DFQAAAAAdAAAAABAE"}
+    name: {type: String, required: true},
+    email: { type:String, required: true, unique:true },
+    password:{type: String, required: true},
+    pic:{type:String,required: true, default: "https://images.unsplash.com/photo-1633332755192-727a05c4013d?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=580&q=80"}
 },{
     timestamps: true
 });

@@ -17,8 +17,6 @@
     "express-async-handler": "^1.2.0",
     "jsonwebtoken": "^9.0.0",
     "mongoose": "^7.3.1",
-    "openai": "^4.103.0",
-    "shortid": "^2.2.17",
     "socket.io": "^4.7.1"
   }
 }

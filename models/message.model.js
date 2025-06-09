@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 
 const messageModel = mongoose.Schema({
-    sender:{ type: String, ref:"User", required: true },
+    sender:{ type: mongoose.Schema.Types.ObjectId, ref:"User" },
     chat:{ type: mongoose.Schema.Types.ObjectId, ref:"Chat" },
     message:{ type: String, trim: true, }
 },{

@@ -1,105 +1,82 @@
-// server/controllers/ai.controller.js
-const OpenAI = require('openai');
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 const dotenv = require("dotenv");
 const AIMessage = require("../models/aiMessage.model");
-const Message = require("../models/message.model");
 dotenv.config();
 
-const openai = new OpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPENROUTER_API_KEY,
-  defaultHeaders: {
-    "HTTP-Referer": process.env.SITE_URL || "http://localhost:3000", // Sesuaikan dengan URL frontend
-    "X-Title": process.env.SITE_NAME || "Collabify", // Nama aplikasi
-  },
-});
+// Inisialisasi SDK
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
 
-// Konfigurasi model
+// Konfigurasi model dan pengaturan
 const generationConfig = {
-  temperature: 0.7, // Sedikit kreativitas, bisa disesuaikan
-  max_tokens: 8192, // Maksimum token, sesuai Gemini sebelumnya
+  temperature: 0,
+  topP: 0.95,
+  topK: 64,
+  maxOutputTokens: 8192,
 };
 
-// In-memory session cache (untuk riwayat percakapan)
+const safetySettings = [
+  { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+  { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+  { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+  { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+];
+
+// In-memory session cache
 const userSessions = {};
 
 const instruction = {
   role: "system",
-  content: `You are a programming error-solving expert. Your goal is to provide accurate, beginner-friendly, and concise answers to programming errors based on verified knowledge.
-  Follow these strict guidelines to avoid hallucination:
-  1. Rely solely on verified programming knowledge. Do not invent solutions or details.
-  2. If you lack sufficient information to answer accurately, say: "I don’t have enough information to answer accurately. Please provide more details or a code snippet."
-  3. For each response, include:
-     - A brief explanation of the error.
-     - A corrected code example (if applicable).
-     - A question asking if the user needs further clarification.
-  4. For follow-up questions, reference the original error and prior responses in the conversation history to maintain context.
-  5. Avoid jargon and ensure explanations are clear for beginners.
-  6. Support all major programming languages (e.g., Python, JavaScript, Java, C++).
-  7. If the query involves deprecated methods, note this and suggest modern alternatives only if certain.`,
+  parts: [
+    {
+      text: `You are a programming error-solving expert. Your goal is to provide accurate, beginner-friendly, and concise answers to programming errors based on verified knowledge.
+      Follow these strict guidelines to avoid hallucination:
+      1. Rely solely on verified programming knowledge. Do not invent solutions or details.
+      2. If you lack sufficient information to answer accurately, say: "I don’t have enough information to answer accurately. Please provide more details or a code snippet."
+      3. For each response, include:
+        - A brief explanation of the error.
+        - A corrected code example (if applicable).
+        - A question asking if the user needs further clarification.
+      4. For follow-up questions, reference the original error and prior responses in the conversation history to maintain context.
+      5. Avoid jargon and ensure explanations are clear for beginners.
+      6. Support all major programming languages (e.g., Python, JavaScript, Java, C++).
+      7. If the query involves deprecated methods, note this and suggest modern alternatives only if certain.`,
+    }
+  ]
 };
-
 const askAI = async (req, res) => {
-  const { prompt, user_id, anonym_id, anonym_name } = req.body;
+  const { prompt, user_id } = req.body;
 
-  if (!prompt) {
-    console.log('Missing prompt in request');
-    return res.status(400).json({ error: "Prompt is required" });
+  if (!prompt || !user_id) {
+    return res.status(400).json({ error: "Prompt and userId are required" });
   }
 
-  const identifier = user_id || anonym_id || `anonym_${Date.now()}`;
-  console.log('AI Request:', { identifier, prompt });
-
   try {
-    // Inisialisasi sesi jika belum ada
-    if (!userSessions[identifier]) {
-      console.log('Starting new session for:', identifier);
-      userSessions[identifier] = [{ role: "system", content: instruction.content }];
-    }
-
-    // Tambahkan prompt ke riwayat
-    userSessions[identifier].push({ role: "user", content: prompt });
-
-    // Kirim ke OpenRouter
-    console.log('Sending to OpenRouter:', userSessions[identifier]);
-    const completion = await openai.chat.completions.create({
-      model: "mistralai/devstral-small:free",
-      messages: userSessions[identifier],
-      ...generationConfig,
+    // Gunakan model Gemini
+    const model = genAI.getGenerativeModel({
+      model: "gemini-1.5-flash",
+      generationConfig,
+      safetySettings,
     });
 
-    const aiReply = completion.choices[0].message.content;
-    console.log('AI Reply:', aiReply);
+    // Buat session baru kalau user belum punya
+    if (!userSessions[user_id]) {
+      userSessions[user_id] = await model.startChat({ history: [], systemInstruction:instruction, });
+    }
 
-    // Tambahkan respons AI ke riwayat
-    userSessions[identifier].push({ role: "assistant", content: aiReply });
+    const session = userSessions[user_id];
 
-    // Simpan ke database
+    // Kirim prompt ke AI
+    const result = await session.sendMessage(prompt);
+    const aiReply = result.response.text();
+
+    // Simpan ke database (jika diperlukan)
     const saved = await AIMessage.create({
-      user: user_id || null,
-      anonym_id: anonym_id || null,
-      anonym_name: anonym_name || "Anonymous",
+      user: user_id,
       prompt,
       reply: aiReply,
     });
-    console.log('Saved AIMessage:', saved);
 
-    if(req.body.chatId){
-      const newMessage = await Message.create({
-        sender:"Chatbot",
-        chat: req.body.chatId,
-        message: aiReply,
-      });
-
-      const fullMessage = await Message.findById(newMessage._id)
-        .populate("chat")
-        .populate("sender")
-
-      const io = req.app.get("io");
-      io.to(req.body.chatId).emit("message recieved", fullMessage);
-    }
-
-    //return res.json({ reply: aiReply });
+    return res.json(saved); // atau bisa: res.json({ reply: aiReply });
   } catch (error) {
     console.error("AI error:", error.message || error);
     return res.status(500).json({ error: "Something went wrong with AI service" });
@@ -109,3 +86,57 @@ const askAI = async (req, res) => {
 module.exports = { askAI };
 
 
+// const axios = require("axios");
+// const AIMessage = require("../models/aiMessage.model");
+
+// const askAI = async (req, res) => {
+//   const { prompt, user_id } = req.body;
+
+//   if (!prompt || !user_id) {
+//     console.log("Body received:", req.body);
+//     console.log("Prompt:", prompt);
+//     console.log("User ID:", user_id);
+
+//     return res.status(400).json({ error: "Prompt and userId are required" });
+    
+//   }
+
+//   try {
+//     // Example API call to AI (change to your real endpoint)
+//     const response = await axios.post("http://localhost:8080/api/ai/ask", { 
+//       prompt,
+//       user_id
+//      });
+//     const aiReply = response.data.reply;
+
+//     // Save to DB
+//     const saved = await AIMessage.create({
+//       user: user_id,
+//       prompt,
+//       reply: aiReply,
+//     });
+
+//     res.json({ reply: aiReply });
+//   } catch (error) {
+//     if (error.response) {
+//       // Handle specific HTTP errors
+//       if (error.response.status === 404) {
+//         console.error("AI service endpoint not found:", error.response.data);
+//         return res.status(404).json({ error: "AI service endpoint not found" });
+//       }
+//       try {
+//         console.error("AI service error:", JSON.stringify(error.response.data, null, 2));
+//       } catch (e) {
+//         console.error("AI service error (stringify failed):", error.message);
+//       }
+//     } else if (error.request) {
+//       console.error("No response from AI service:", error.request);
+//       return res.status(500).json({ error: "No response from AI service" });
+//     } else {
+//       console.error("Error in AI service request:", error.message);
+//       return res.status(500).json({ error: "AI service failed" });
+//     }
+//   }
+// };
+
+// module.exports = { askAI };
